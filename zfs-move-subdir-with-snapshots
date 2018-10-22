@@ -1,0 +1,140 @@
+#!/opt/local/bin/php
+<?php
+
+$appName = basename($argv[0]);
+
+print "$appName: Moves a subdirectory inside a ZFS filesystem to another ZFS filesystem, preserving its snapshot history.\n";
+print "(Only deletes the subdirectory from the live filesystem, since ZFS snapshots are immutable.)\n";
+print "Potentially useful for splitting up a ZFS filesystem into multiple ZFS filesystems.\n";
+print "Assumes snapshot names alphanumerically sort in chronological order.\n";
+print "\n";
+
+if ($argc != 3)
+  die("Usage: $appName <sourceDir> <destinationFilesystem>\n");
+
+$sourceDir = rtrim($argv[1], '/');
+$destinationFilesystem = rtrim($argv[2], '/');
+
+if (!is_dir($sourceDir))
+  die("Error: '$sourceDir' isn't a directory.\n");
+
+if (!is_dir($destinationFilesystem))
+  die("Error: '$destinationFilesystem' isn't a directory.\n");
+
+$dfOutput = explode(' ', exec('df ' . escapeshellarg($sourceDir), $output, $exitCode));
+$sourceFilesystem = $dfOutput[0];
+if ($exitCode)
+  die("Error: df failed.\n");
+
+exec('zfs list ' . escapeshellarg($sourceFilesystem), $output, $exitCode);
+if ($exitCode)
+  die("Error: '$sourceDir' isn't on a ZFS filesystem.\n");
+
+if ($sourceDir == $sourceFilesystem)
+  die("Error: '$sourceDir' is a ZFS filesystem root.  If you want to copy the whole filesystem you should probably use 'zfs send' instead.\n");
+
+exec('zfs list ' . escapeshellarg($destinationFilesystem), $output, $exitCode);
+if ($exitCode)
+  die("Error: '$destinationFilesystem' isn't a ZFS filesystem.\n");
+
+if (!($dh = opendir($destinationFilesystem)))
+  die("Error: Can't open '$destinationFilesystem'.\n");
+while (($dirent = readdir($dh)) !== false)
+  if (!in_array($dirent, array('.', '..')))
+    die("Error: Destination filesystem isn't empty.\n");
+closedir($dh);
+
+$sourceSnapshotDir = "$sourceFilesystem/.zfs/snapshot";
+if (!is_dir($sourceSnapshotDir))
+  die("Error: '$sourceSnapshotDir' isn't a directory.\n");
+
+$destinationSnapshotDir = "$destinationFilesystem/.zfs/snapshot";
+if (!is_dir($destinationSnapshotDir))
+  die("Error: '$destinationSnapshotDir' isn't a directory.\n");
+
+if (!($dh = opendir($destinationSnapshotDir)))
+  die("Error: Can't open '$destinationSnapshotDir'.\n");
+while (($dirent = readdir($dh)) !== false)
+  if (!in_array($dirent, array('.', '..')))
+    die("Error: Destination filesystem already has snapshots.\n");
+closedir($dh);
+
+$sourceDirRelative = substr($sourceDir, strlen($sourceFilesystem) + 1);
+if (!strlen($sourceDirRelative))
+  die("Error: Couldn't figure out source dir.\n");
+
+
+print "Source Filesystem     : $sourceFilesystem\n";
+print "Source Directory      : $sourceDirRelative\n";
+print "Destination Filesystem: $destinationFilesystem\n";
+print "\n";
+
+print "Searching for snapshots…\n";
+if (!($dh = opendir($sourceSnapshotDir)))
+  die("Error: Can't open '$sourceSnapshotDir'.\n");
+$sourceSnapshots = array();
+while (($dirent = readdir($dh)) !== false) {
+  if (in_array($dirent, array('.', '..')))
+    continue;
+
+  $possibleSnapshot = "$sourceSnapshotDir/$dirent";
+  $sourceSnapshots[$dirent] = is_dir("$possibleSnapshot/$sourceDirRelative");
+}
+closedir($dh);
+
+if (!count($sourceSnapshots))
+  die("Error: No snapshots.");
+
+ksort($sourceSnapshots);
+reset($sourceSnapshots);
+
+print "Oldest snapshot on " . str_pad($sourceFilesystem, 30) . ": " . key($sourceSnapshots) . "\n";
+
+foreach ($sourceSnapshots as $snapshot => $status)
+  if ($status) {
+    print "Oldest snapshot containing " . str_pad($sourceDirRelative, 22) . ": $snapshot\n";
+    break;
+  }
+
+print "Total snapshots                                  : " . count($sourceSnapshots) . "\n";
+
+$snapshotsToCopyCount = 0;
+foreach ($sourceSnapshots as $snapshot => $status)
+  if ($status)
+    ++$snapshotsToCopyCount;
+print "Snapshots to copy                                : $snapshotsToCopyCount\n";
+print "\n";
+
+if (strtolower(readline("Continue? [y/N] ")) != 'y')
+  die("Quit.\n");
+
+print "\n";
+print "Copying…\n";
+foreach ($sourceSnapshots as $snapshot => $status) {
+  if (!$status)
+    continue;
+
+  print "    $snapshot\n";
+  passthru('rsync -a --delete ' . escapeshellarg("$sourceSnapshotDir/$snapshot/$sourceDirRelative/") . ' ' . escapeshellarg($destinationFilesystem), $exitCode);
+  if ($exitCode)
+    die("Error: rsync failed.\n");
+
+  passthru('zfs snapshot ' . escapeshellarg(substr($destinationFilesystem, 1)) . '@' . escapeshellarg($snapshot), $exitCode);
+  if ($exitCode)
+    die("Error: snapshot failed.\n");
+}
+
+print "    live filesystem\n";
+passthru('rsync -a --delete ' . escapeshellarg("$sourceDir/") . ' ' . escapeshellarg($destinationFilesystem), $exitCode);
+if ($exitCode)
+  die("Error: rsync failed.\n");
+print "\n";
+
+if (strtolower(readline("Delete source? [y/N] ")) != 'y')
+  die("Quit.\n");
+
+print "\n";
+print "Deleting source…\n";
+passthru('echo rm -Rf ' . escapeshellarg($sourceDir), $exitCode);
+if ($exitCode)
+  die("Error: rm failed.\n");
