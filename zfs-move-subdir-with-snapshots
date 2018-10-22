@@ -135,6 +135,6 @@ if (strtolower(readline("Delete source? [y/N] ")) != 'y')
 
 print "\n";
 print "Deleting source…\n";
-passthru('echo rm -Rf ' . escapeshellarg($sourceDir), $exitCode);
+passthru('rm -Rf ' . escapeshellarg($sourceDir), $exitCode);
 if ($exitCode)
   die("Error: rm failed.\n");
