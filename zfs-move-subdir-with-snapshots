@@ -93,6 +93,7 @@ print "Oldest snapshot on " . str_pad($sourceFilesystem, 30) . ": " . key($sourc
 foreach ($sourceSnapshots as $snapshot => $status)
   if ($status) {
     print "Oldest snapshot containing " . str_pad($sourceDirRelative, 22) . ": $snapshot\n";
+    $oldestSize = exec("du -sh " . escapeshellarg("$sourceSnapshotDir/$snapshot/$sourceDirRelative/") . " | cut -f1");
     break;
   }
 
@@ -103,6 +104,12 @@ foreach ($sourceSnapshots as $snapshot => $status)
   if ($status)
     ++$snapshotsToCopyCount;
 print "Snapshots to copy                                : $snapshotsToCopyCount\n";
+
+print "Size of source in oldest snapshot                : $oldestSize\n";
+
+$liveSize = exec("du -sh " . escapeshellarg($sourceDir) . " | cut -f1");
+print "Size of source on live filesystem                : $liveSize\n";
+
 print "\n";
 
 if (strtolower(readline("Continue? [y/N] ")) != 'y')
