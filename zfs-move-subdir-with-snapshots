@@ -122,7 +122,7 @@ foreach ($sourceSnapshots as $snapshot => $status) {
     continue;
 
   print "    $snapshot\n";
-  passthru('rsync -a --delete ' . escapeshellarg("$sourceSnapshotDir/$snapshot/$sourceDirRelative/") . ' ' . escapeshellarg($destinationFilesystem), $exitCode);
+  passthru('rsync -a --info=progress2 --delete ' . escapeshellarg("$sourceSnapshotDir/$snapshot/$sourceDirRelative/") . ' ' . escapeshellarg($destinationFilesystem), $exitCode);
   if ($exitCode)
     die("Error: rsync failed.\n");
 
