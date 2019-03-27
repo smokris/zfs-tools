@@ -1,4 +1,4 @@
-#!/opt/local/bin/php
+#!/opt/tools/bin/php
 <?php
 
 $appName = basename($argv[0]);
